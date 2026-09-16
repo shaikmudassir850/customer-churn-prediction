@@ -4,9 +4,8 @@ import pandas as pd
 
 app = Flask(__name__)
 
-
 # ============================================================
-# LOAD MODEL AND SCALER
+# LOAD MODEL
 # ============================================================
 
 model = joblib.load("best_ada_model.pkl")
@@ -23,7 +22,7 @@ def home():
 
 
 # ============================================================
-# CUSTOMER CHURN PREDICTION
+# PREDICTION
 # ============================================================
 
 @app.route("/predict", methods=["POST"])
@@ -31,21 +30,19 @@ def predict():
 
     try:
 
-        # ----------------------------------------------------
-        # GET DATA FROM HTML
-        # ----------------------------------------------------
-
         data = request.get_json()
 
-
         # ----------------------------------------------------
-        # NUMERIC FEATURES
+        # CREATE INPUT DATA
         # ----------------------------------------------------
 
-        numeric_data = pd.DataFrame([{
+        input_data = pd.DataFrame([{
 
             "tenure_months":
                 float(data["tenure_months"]),
+
+            "contract_type":
+                int(data["contract_type"]),
 
             "monthly_charges":
                 float(data["monthly_charges"]),
@@ -53,42 +50,11 @@ def predict():
             "total_charges":
                 float(data["total_charges"]),
 
-            "avg_monthly_usage_gb":
-                float(data["avg_monthly_usage_gb"])
-
-        }])
-
-
-        # ----------------------------------------------------
-        # SCALE ONLY THE NUMERIC FEATURES
-        # ----------------------------------------------------
-
-        numeric_scaled = scaler.transform(numeric_data)
-
-
-        # Convert scaled values back to DataFrame
-        numeric_scaled = pd.DataFrame(
-            numeric_scaled,
-            columns=[
-                "tenure_months",
-                "monthly_charges",
-                "total_charges",
-                "avg_monthly_usage_gb"
-            ]
-        )
-
-
-        # ----------------------------------------------------
-        # CATEGORICAL / ALREADY ENCODED FEATURES
-        # ----------------------------------------------------
-
-        categorical_data = pd.DataFrame([{
-
-            "contract_type":
-                int(data["contract_type"]),
-
             "payment_method":
                 int(data["payment_method"]),
+
+            "avg_monthly_usage_gb":
+                float(data["avg_monthly_usage_gb"]),
 
             "satisfaction_score":
                 float(data["satisfaction_score"]),
@@ -100,33 +66,50 @@ def predict():
 
 
         # ----------------------------------------------------
-        # COMBINE FEATURES
+        # SCALE ONLY THE 4 FEATURES USED BY SCALER
         # ----------------------------------------------------
 
-        input_data = pd.concat(
+        numeric_columns = [
+            "tenure_months",
+            "monthly_charges",
+            "total_charges",
+            "avg_monthly_usage_gb"
+        ]
+
+        scaled_numeric = pd.DataFrame(
+            scaler.transform(
+                input_data[numeric_columns]
+            ),
+            columns=numeric_columns
+        )
+
+
+        # ----------------------------------------------------
+        # ADD NON-SCALED FEATURES
+        # ----------------------------------------------------
+
+        final_input = pd.concat(
             [
-                numeric_scaled,
-                categorical_data
+                scaled_numeric,
+                input_data[
+                    [
+                        "contract_type",
+                        "payment_method",
+                        "satisfaction_score",
+                        "autopay_enabled"
+                    ]
+                ]
             ],
             axis=1
         )
 
 
         # ----------------------------------------------------
-        # EXACT FEATURE ORDER
+        # EXACT MODEL FEATURE ORDER
         # ----------------------------------------------------
 
-        input_data = input_data[
-            [
-                "tenure_months",
-                "contract_type",
-                "monthly_charges",
-                "total_charges",
-                "payment_method",
-                "avg_monthly_usage_gb",
-                "satisfaction_score",
-                "autopay_enabled"
-            ]
+        final_input = final_input[
+            model.feature_names_in_
         ]
 
 
@@ -135,36 +118,31 @@ def predict():
         # ----------------------------------------------------
 
         prediction = int(
-            model.predict(input_data)[0]
+            model.predict(final_input)[0]
         )
 
 
         # ----------------------------------------------------
-        # CHURN PROBABILITY
+        # PROBABILITY
         # ----------------------------------------------------
 
-        churn_probability = None
+        probabilities = model.predict_proba(final_input)[0]
 
-        if hasattr(model, "predict_proba"):
+        classes = list(model.classes_)
 
-            probabilities = model.predict_proba(input_data)[0]
+        churn_probability = 0.0
 
-            classes = list(model.classes_)
+        if 1 in classes:
 
-            if 1 in classes:
+            churn_index = classes.index(1)
 
-                churn_index = classes.index(1)
-
-                churn_probability = (
-                    probabilities[churn_index] * 100
-                )
+            churn_probability = (
+                float(probabilities[churn_index]) * 100
+            )
 
 
         # ----------------------------------------------------
         # RESULT
-        #
-        # 1 = CHURN / LEAVE
-        # 0 = STAY
         # ----------------------------------------------------
 
         if prediction == 1:
@@ -177,7 +155,7 @@ def predict():
 
 
         # ----------------------------------------------------
-        # SEND RESULT TO HTML
+        # SEND RESPONSE
         # ----------------------------------------------------
 
         return jsonify({
@@ -188,8 +166,6 @@ def predict():
 
             "churn_probability":
                 round(churn_probability, 2)
-                if churn_probability is not None
-                else None
 
         })
 
@@ -204,7 +180,7 @@ def predict():
 
 
 # ============================================================
-# RUN FLASK
+# RUN
 # ============================================================
 
 if __name__ == "__main__":
