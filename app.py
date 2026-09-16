@@ -4,8 +4,9 @@ import pandas as pd
 
 app = Flask(__name__)
 
+
 # ============================================================
-# LOAD SAVED MODEL AND SCALER
+# LOAD MODEL AND SCALER
 # ============================================================
 
 model = joblib.load("best_ada_model.pkl")
@@ -30,81 +31,111 @@ def predict():
 
     try:
 
+        # ----------------------------------------------------
+        # GET DATA FROM HTML
+        # ----------------------------------------------------
+
         data = request.get_json()
 
+
         # ----------------------------------------------------
-        # GET INPUT VALUES
-        # HTML ALREADY SENDS ENCODED VALUES
+        # NUMERIC FEATURES
         # ----------------------------------------------------
 
-        input_data = pd.DataFrame([{
+        numeric_data = pd.DataFrame([{
 
-            "tenure_months": float(
-                data["tenure_months"]
-            ),
+            "tenure_months":
+                float(data["tenure_months"]),
 
-            "contract_type": int(
-                data["contract_type"]
-            ),
+            "monthly_charges":
+                float(data["monthly_charges"]),
 
-            "monthly_charges": float(
-                data["monthly_charges"]
-            ),
+            "total_charges":
+                float(data["total_charges"]),
 
-            "total_charges": float(
-                data["total_charges"]
-            ),
-
-            "payment_method": int(
-                data["payment_method"]
-            ),
-
-            "avg_monthly_usage_gb": float(
-                data["avg_monthly_usage_gb"]
-            ),
-
-            "satisfaction_score": float(
-                data["satisfaction_score"]
-            ),
-
-            "autopay_enabled": int(
-                data["autopay_enabled"]
-            )
+            "avg_monthly_usage_gb":
+                float(data["avg_monthly_usage_gb"])
 
         }])
 
 
         # ----------------------------------------------------
-        # EXACT FEATURE ORDER USED FOR TRAINING
+        # SCALE ONLY THE NUMERIC FEATURES
         # ----------------------------------------------------
 
-        feature_order = [
-            "tenure_months",
-            "contract_type",
-            "monthly_charges",
-            "total_charges",
-            "payment_method",
-            "avg_monthly_usage_gb",
-            "satisfaction_score",
-            "autopay_enabled"
+        numeric_scaled = scaler.transform(numeric_data)
+
+
+        # Convert scaled values back to DataFrame
+        numeric_scaled = pd.DataFrame(
+            numeric_scaled,
+            columns=[
+                "tenure_months",
+                "monthly_charges",
+                "total_charges",
+                "avg_monthly_usage_gb"
+            ]
+        )
+
+
+        # ----------------------------------------------------
+        # CATEGORICAL / ALREADY ENCODED FEATURES
+        # ----------------------------------------------------
+
+        categorical_data = pd.DataFrame([{
+
+            "contract_type":
+                int(data["contract_type"]),
+
+            "payment_method":
+                int(data["payment_method"]),
+
+            "satisfaction_score":
+                float(data["satisfaction_score"]),
+
+            "autopay_enabled":
+                int(data["autopay_enabled"])
+
+        }])
+
+
+        # ----------------------------------------------------
+        # COMBINE FEATURES
+        # ----------------------------------------------------
+
+        input_data = pd.concat(
+            [
+                numeric_scaled,
+                categorical_data
+            ],
+            axis=1
+        )
+
+
+        # ----------------------------------------------------
+        # EXACT FEATURE ORDER
+        # ----------------------------------------------------
+
+        input_data = input_data[
+            [
+                "tenure_months",
+                "contract_type",
+                "monthly_charges",
+                "total_charges",
+                "payment_method",
+                "avg_monthly_usage_gb",
+                "satisfaction_score",
+                "autopay_enabled"
+            ]
         ]
 
-        input_data = input_data[feature_order]
-
 
         # ----------------------------------------------------
-        # SCALE INPUT
-        # ----------------------------------------------------
-
-        input_scaled = scaler.transform(input_data)
-
-
-        # ----------------------------------------------------
-        # PREDICT
+        # PREDICTION
         # ----------------------------------------------------
 
         prediction = int(
-            model.predict(input_scaled)[0]
+            model.predict(input_data)[0]
         )
 
 
@@ -116,9 +147,7 @@ def predict():
 
         if hasattr(model, "predict_proba"):
 
-            probabilities = model.predict_proba(
-                input_scaled
-            )[0]
+            probabilities = model.predict_proba(input_data)[0]
 
             classes = list(model.classes_)
 
@@ -132,10 +161,10 @@ def predict():
 
 
         # ----------------------------------------------------
-        # FINAL RESULT
+        # RESULT
         #
-        # 1 = CUSTOMER WILL LEAVE
-        # 0 = CUSTOMER WILL STAY
+        # 1 = CHURN / LEAVE
+        # 0 = STAY
         # ----------------------------------------------------
 
         if prediction == 1:
@@ -148,7 +177,7 @@ def predict():
 
 
         # ----------------------------------------------------
-        # SEND RESPONSE TO HTML
+        # SEND RESULT TO HTML
         # ----------------------------------------------------
 
         return jsonify({
@@ -175,7 +204,7 @@ def predict():
 
 
 # ============================================================
-# RUN APPLICATION
+# RUN FLASK
 # ============================================================
 
 if __name__ == "__main__":
